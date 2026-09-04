@@ -18,7 +18,29 @@ export default async function DashboardPage({
   const sp = await searchParams;
   const preset = (sp.range as DateRangePreset) || "today";
   const range = resolveDateRange(preset, { from: sp.from, to: sp.to });
-  const data = await getDashboardData(range);
+  let data;
+  try {
+    data = await getDashboardData(range);
+  } catch (err) {
+    // If data fetching fails (for example when DATABASE_URL is not set on Vercel),
+    // render a helpful fallback so the site doesn't appear completely blank.
+    // Log the error server-side for visibility in deployment logs.
+    // eslint-disable-next-line no-console
+    console.error("Dashboard data load failed:", err);
+
+    return (
+      <div className="p-6">
+        <div className="max-w-3xl">
+          <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted mt-2">
+            Unable to load dashboard data. This often means the database or environment
+            variables are not configured for this deployment (for example, DATABASE_URL).
+          </p>
+          <p className="text-sm text-muted mt-2">Check your deployment logs and environment settings on Vercel.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
