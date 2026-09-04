@@ -16,23 +16,6 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const [gameTypes, stations, pricingRules, staff] = await Promise.all([
-    listActiveGameTypes(),
-    listStations(),
-    listPricingRules(),
-    listActiveStaff(),
-  ]);
-  const dbMissing = !process.env.DATABASE_URL && process.env.NODE_ENV === "production";
-
-  return (
-    <html lang="en" className="h-full antialiased">
-      <body className="min-h-full font-sans">
-        {dbMissing && (
-          <div className="w-full bg-yellow-600 text-black p-2 text-sm text-center">
-            Warning: Database not configured for this deployment. Some pages may be unavailable. Set
-            DATABASE_URL in Vercel Project Settings → Environment Variables.
-          </div>
-        )}
   const dbMissing = !process.env.DATABASE_URL && process.env.NODE_ENV === "production";
 
   if (dbMissing) {
