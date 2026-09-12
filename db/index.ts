@@ -30,7 +30,24 @@ if (!process.env.DATABASE_URL) {
     },
   ) as NodePgDatabase<typeof schema>;
 } else {
-  const pool = global.__gzPool ?? new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool =
+    global.__gzPool ??
+    new Pool({
+      // pg's own connection-string parser always derives `ssl` from a
+      // `sslmode=...` query param and that derived value unconditionally
+      // overrides any explicit `ssl` option passed alongside it (see
+      // node_modules/pg/lib/connection-parameters.js: the parsed
+      // connectionString is Object.assign'd on top of the rest of the
+      // config). `sslmode=require`/`verify-full` triggers full CA-chain
+      // verification, which fails against Supabase's pooler certificate
+      // chain (SELF_SIGNED_CERT_IN_CHAIN) even from Vercel's own network.
+      // Stripping sslmode here lets our explicit ssl option below actually
+      // take effect — the connection still runs over TLS, it just skips CA
+      // verification, matching Supabase's documented guidance for pg/Prisma
+      // clients connecting to their pooler.
+      connectionString: process.env.DATABASE_URL.replace(/([?&])sslmode=[^&]*&?/, "$1").replace(/[?&]$/, ""),
+      ssl: { rejectUnauthorized: false },
+    });
 
   if (process.env.NODE_ENV !== "production") {
     global.__gzPool = pool;
