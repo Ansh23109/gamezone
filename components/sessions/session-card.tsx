@@ -18,14 +18,17 @@ import type { listActiveSessions } from "@/lib/queries/sessions";
 type SessionWithRelations = Awaited<ReturnType<typeof listActiveSessions>>[number];
 
 function useElapsed(session: SessionWithRelations) {
-  const [, tick] = useState(0);
+  // `now` doubles as both the re-render trigger and the timestamp used
+  // below — Date.now() is only ever called inside the lazy useState
+  // initializer (once, on mount) and inside the interval callback, never
+  // directly in the render body, so this stays a pure render.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (session.status !== "ACTIVE") return;
-    const id = setInterval(() => tick((t) => t + 1), 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [session.status]);
 
-  const now = Date.now();
   const start = new Date(session.actualStartTime).getTime();
   let elapsedMs = now - start - session.totalPausedMinutes * 60000;
   if (session.status === "PAUSED" && session.pausedAt) {
