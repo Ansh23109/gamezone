@@ -26,10 +26,13 @@ export async function proxy(request: NextRequest) {
 
   if (hostMode.kind === "admin") {
     const isOwner = isAuthenticated && appMetadata.role === "OWNER";
-    if (request.nextUrl.pathname.startsWith("/login")) {
-      // Already signed in as OWNER -> skip the login page. Otherwise let it
-      // render — redirecting /login itself back to /login would loop forever.
-      if (isOwner) return redirectTo(request, "/admin", response);
+    if (isPublicAuthPath(request.nextUrl.pathname)) {
+      // Already signed in as OWNER -> skip straight past /login. Otherwise
+      // let these render — redirecting /login (or /accept-invite, reached
+      // pre-auth from an invite email link) back to /login would loop.
+      if (isOwner && request.nextUrl.pathname.startsWith("/login")) {
+        return redirectTo(request, "/admin", response);
+      }
       return response;
     }
     if (!isOwner) {
@@ -59,9 +62,12 @@ export async function proxy(request: NextRequest) {
   // guards consistent with each other.
   const sessionMatchesTenant = isAuthenticated && appMetadata.tenantId === tenant.id;
 
-  if (request.nextUrl.pathname.startsWith("/login")) {
-    // Already signed in for this tenant -> skip the login page.
-    if (sessionMatchesTenant) {
+  if (isPublicAuthPath(request.nextUrl.pathname)) {
+    // Already signed in for this tenant -> skip straight past /login. Leave
+    // /accept-invite reachable regardless (the invite-email link lands here
+    // pre-auth; the Supabase session tokens are in the URL hash, which never
+    // reaches the server, so there's nothing to check here yet).
+    if (sessionMatchesTenant && request.nextUrl.pathname.startsWith("/login")) {
       return redirectTo(request, "/", response);
     }
     return response;
@@ -72,6 +78,14 @@ export async function proxy(request: NextRequest) {
   }
 
   return response;
+}
+
+/** Paths reachable without an existing session: the login form itself, and
+ * the invite-acceptance page an invite email links to (which establishes
+ * its own session client-side from the URL hash — see
+ * components/auth/accept-invite-form.tsx). */
+function isPublicAuthPath(pathname: string): boolean {
+  return pathname.startsWith("/login") || pathname.startsWith("/accept-invite");
 }
 
 function redirectTo(request: NextRequest, path: string, base: NextResponse) {
