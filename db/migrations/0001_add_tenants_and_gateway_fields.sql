@@ -111,7 +111,11 @@ CREATE UNIQUE INDEX "transactions_gateway_payment_id_idx" ON "transactions" USIN
 CREATE INDEX "users_tenant_idx" ON "users" USING btree ("tenant_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_tenant_email_idx" ON "users" USING btree ("tenant_id","email");--> statement-breakpoint
 
--- 9) Supabase Auth linkage. Drizzle doesn't model the `auth` schema, so this
--- FK is hand-appended rather than generated.
-ALTER TABLE "users" ADD CONSTRAINT "users_auth_user_id_unique" UNIQUE("auth_user_id");--> statement-breakpoint
-ALTER TABLE "users" ADD CONSTRAINT "users_auth_user_id_fkey" FOREIGN KEY ("auth_user_id") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+-- 9) Supabase Auth linkage. No formal FK to auth.users(id): that column is
+-- native `uuid` while this schema uses `text` ids by convention throughout,
+-- and Postgres FK constraints require matching types on both sides (not a
+-- gap — this is the common, accepted pattern for referencing Supabase's
+-- managed auth.users table from app tables; integrity is enforced at the
+-- application layer, since this column is only ever written with a UUID
+-- string returned directly from Supabase's own Admin API).
+ALTER TABLE "users" ADD CONSTRAINT "users_auth_user_id_unique" UNIQUE("auth_user_id");

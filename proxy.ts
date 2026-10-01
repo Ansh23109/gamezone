@@ -43,18 +43,24 @@ export async function proxy(request: NextRequest) {
   response.headers.set("x-tenant-id", tenant.id);
   response.headers.set("x-tenant-slug", tenant.slug);
 
-  const isOwner = isAuthenticated && appMetadata.role === "OWNER";
+  // OWNER does NOT get a bypass onto tenant consoles: OWNER has no tenant
+  // `users` row (lib/tenant/context.ts), so requireTenantUser() — which
+  // every tenant page/action calls — always rejects it regardless of what
+  // proxy lets through. OWNER's only surface is /admin; impersonating a
+  // tenant isn't supported in v1, so a tenant subdomain is gated purely on
+  // sessionMatchesTenant here, keeping proxy and the Server-Action-level
+  // guards consistent with each other.
   const sessionMatchesTenant = isAuthenticated && appMetadata.tenantId === tenant.id;
 
   if (request.nextUrl.pathname.startsWith("/login")) {
-    // Already signed in for this tenant (or OWNER impersonating) -> skip the login page.
-    if (isOwner || sessionMatchesTenant) {
+    // Already signed in for this tenant -> skip the login page.
+    if (sessionMatchesTenant) {
       return redirectTo(request, "/", response);
     }
     return response;
   }
 
-  if (!isOwner && !sessionMatchesTenant) {
+  if (!sessionMatchesTenant) {
     return redirectTo(request, "/login", response);
   }
 
