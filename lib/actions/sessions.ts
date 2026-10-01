@@ -1,12 +1,14 @@
 "use server";
 
 import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { calculatePrice } from "@/lib/pricing";
 import { findConflictingBookings } from "@/lib/availability";
 import { findOrCreateCustomer } from "./customers";
 import { round2 } from "@/lib/format";
+import { eqTenant } from "@/lib/tenant/scope";
+import { requireTenantUser } from "@/lib/auth/session";
 
 function refreshPaths() {
   revalidatePath("/active-sessions");
@@ -23,7 +25,6 @@ export type WalkInInput = {
   gameTypeId: string;
   stationId: string;
   durationMinutes: number;
-  staffId?: string;
   paymentMethod?: "CASH" | "UPI" | "CARD" | "OTHER";
   markPaid?: boolean;
 };
@@ -31,10 +32,11 @@ export type WalkInInput = {
 /** The fast walk-in path: pick game → pick station → (optional) customer →
  * duration → price is computed automatically → session starts immediately. */
 export async function startWalkInSession(input: WalkInInput) {
+  const { tenantId, user } = await requireTenantUser();
   const now = new Date();
   const endTime = new Date(now.getTime() + input.durationMinutes * 60000);
 
-  const conflicts = await findConflictingBookings({
+  const conflicts = await findConflictingBookings(tenantId, {
     stationId: input.stationId,
     startTime: now,
     endTime,
@@ -48,7 +50,7 @@ export async function startWalkInSession(input: WalkInInput) {
     mobile: input.customerMobile,
   });
 
-  const { amount } = await calculatePrice({
+  const { amount } = await calculatePrice(tenantId, {
     gameTypeId: input.gameTypeId,
     stationId: input.stationId,
     startTime: now,
@@ -58,6 +60,7 @@ export async function startWalkInSession(input: WalkInInput) {
   const [booking] = await db
     .insert(schema.bookings)
     .values({
+      tenantId,
       customerId: customer.id,
       gameTypeId: input.gameTypeId,
       stationId: input.stationId,
@@ -69,13 +72,14 @@ export async function startWalkInSession(input: WalkInInput) {
       paymentStatus: input.markPaid ? "PAID" : "PENDING",
       isWalkIn: true,
       checkedInAt: now,
-      createdById: input.staffId || null,
+      createdById: user.id,
     })
     .returning();
 
   const [session] = await db
     .insert(schema.gamingSessions)
     .values({
+      tenantId,
       bookingId: booking.id,
       customerId: customer.id,
       gameTypeId: input.gameTypeId,
@@ -85,13 +89,14 @@ export async function startWalkInSession(input: WalkInInput) {
       plannedDurationMinutes: input.durationMinutes,
       baseAmount: amount.toString(),
       totalAmount: amount.toString(),
-      createdById: input.staffId || null,
+      createdById: user.id,
     })
     .returning();
 
   const [payment] = await db
     .insert(schema.payments)
     .values({
+      tenantId,
       bookingId: booking.id,
       sessionId: session.id,
       customerId: customer.id,
@@ -103,6 +108,7 @@ export async function startWalkInSession(input: WalkInInput) {
 
   if (input.markPaid) {
     await db.insert(schema.transactions).values({
+      tenantId,
       paymentId: payment.id,
       bookingId: booking.id,
       sessionId: session.id,
@@ -111,22 +117,26 @@ export async function startWalkInSession(input: WalkInInput) {
       stationId: input.stationId,
       amount: amount.toString(),
       method: input.paymentMethod ?? "CASH",
-      staffId: input.staffId || null,
+      staffId: user.id,
     });
   }
 
   await db
     .update(schema.stations)
     .set({ status: "ACTIVE", updatedAt: new Date() })
-    .where(eq(schema.stations.id, input.stationId));
+    .where(and(eqTenant(schema.stations.tenantId, tenantId), eq(schema.stations.id, input.stationId)));
 
   refreshPaths();
   return { booking, session, customer };
 }
 
 /** For a pre-existing booking: the customer has arrived, start play now. */
-export async function startSessionFromBooking(bookingId: string, staffId?: string) {
-  const [booking] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, bookingId));
+export async function startSessionFromBooking(bookingId: string) {
+  const { tenantId, user } = await requireTenantUser();
+  const [booking] = await db
+    .select()
+    .from(schema.bookings)
+    .where(and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.id, bookingId)));
   if (!booking) throw new Error("Booking not found");
 
   const now = new Date();
@@ -134,6 +144,7 @@ export async function startSessionFromBooking(bookingId: string, staffId?: strin
   const [session] = await db
     .insert(schema.gamingSessions)
     .values({
+      tenantId,
       bookingId: booking.id,
       customerId: booking.customerId,
       gameTypeId: booking.gameTypeId,
@@ -143,26 +154,27 @@ export async function startSessionFromBooking(bookingId: string, staffId?: strin
       plannedDurationMinutes: booking.durationMinutes,
       baseAmount: booking.price,
       totalAmount: booking.price,
-      createdById: staffId || null,
+      createdById: user.id,
     })
     .returning();
 
   await db
     .update(schema.bookings)
     .set({ status: "ACTIVE", updatedAt: new Date() })
-    .where(eq(schema.bookings.id, bookingId));
+    .where(and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.id, bookingId)));
 
   const [existingPayment] = await db
     .select()
     .from(schema.payments)
-    .where(eq(schema.payments.bookingId, bookingId));
+    .where(and(eqTenant(schema.payments.tenantId, tenantId), eq(schema.payments.bookingId, bookingId)));
   if (existingPayment) {
     await db
       .update(schema.payments)
       .set({ sessionId: session.id, updatedAt: new Date() })
-      .where(eq(schema.payments.id, existingPayment.id));
+      .where(and(eqTenant(schema.payments.tenantId, tenantId), eq(schema.payments.id, existingPayment.id)));
   } else {
     await db.insert(schema.payments).values({
+      tenantId,
       bookingId: booking.id,
       sessionId: session.id,
       customerId: booking.customerId,
@@ -175,17 +187,21 @@ export async function startSessionFromBooking(bookingId: string, staffId?: strin
   await db
     .update(schema.stations)
     .set({ status: "ACTIVE", updatedAt: new Date() })
-    .where(eq(schema.stations.id, booking.stationId));
+    .where(and(eqTenant(schema.stations.tenantId, tenantId), eq(schema.stations.id, booking.stationId)));
 
   refreshPaths();
   return session;
 }
 
 export async function extendSession(sessionId: string, extraMinutes: number) {
-  const [session] = await db.select().from(schema.gamingSessions).where(eq(schema.gamingSessions.id, sessionId));
+  const { tenantId } = await requireTenantUser();
+  const [session] = await db
+    .select()
+    .from(schema.gamingSessions)
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)));
   if (!session) throw new Error("Session not found");
 
-  const { amount: extraAmount } = await calculatePrice({
+  const { amount: extraAmount } = await calculatePrice(tenantId, {
     gameTypeId: session.gameTypeId,
     stationId: session.stationId,
     startTime: new Date(),
@@ -204,25 +220,31 @@ export async function extendSession(sessionId: string, extraMinutes: number) {
       totalAmount: newTotal.toString(),
       updatedAt: new Date(),
     })
-    .where(eq(schema.gamingSessions.id, sessionId))
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)))
     .returning();
 
-  const [booking] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, session.bookingId));
+  const [booking] = await db
+    .select()
+    .from(schema.bookings)
+    .where(and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.id, session.bookingId)));
   if (booking) {
     const newEndTime = new Date(booking.startTime.getTime() + newPlanned * 60000);
     await db
       .update(schema.bookings)
       .set({ endTime: newEndTime, durationMinutes: newPlanned, price: newBaseAmount.toString(), updatedAt: new Date() })
-      .where(eq(schema.bookings.id, booking.id));
+      .where(and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.id, booking.id)));
   }
 
-  const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.sessionId, sessionId));
+  const [payment] = await db
+    .select()
+    .from(schema.payments)
+    .where(and(eqTenant(schema.payments.tenantId, tenantId), eq(schema.payments.sessionId, sessionId)));
   if (payment) {
     const status = Number(payment.amountPaid) >= newTotal ? "PAID" : Number(payment.amountPaid) > 0 ? "PARTIALLY_PAID" : "PENDING";
     await db
       .update(schema.payments)
       .set({ totalAmount: newTotal.toString(), status, updatedAt: new Date() })
-      .where(eq(schema.payments.id, payment.id));
+      .where(and(eqTenant(schema.payments.tenantId, tenantId), eq(schema.payments.id, payment.id)));
   }
 
   refreshPaths();
@@ -230,17 +252,22 @@ export async function extendSession(sessionId: string, extraMinutes: number) {
 }
 
 export async function pauseSession(sessionId: string) {
+  const { tenantId } = await requireTenantUser();
   const [updated] = await db
     .update(schema.gamingSessions)
     .set({ status: "PAUSED", pausedAt: new Date(), updatedAt: new Date() })
-    .where(eq(schema.gamingSessions.id, sessionId))
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)))
     .returning();
   refreshPaths();
   return updated;
 }
 
 export async function resumeSession(sessionId: string) {
-  const [session] = await db.select().from(schema.gamingSessions).where(eq(schema.gamingSessions.id, sessionId));
+  const { tenantId } = await requireTenantUser();
+  const [session] = await db
+    .select()
+    .from(schema.gamingSessions)
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)));
   if (!session) throw new Error("Session not found");
 
   const pausedMinutes = session.pausedAt
@@ -255,14 +282,18 @@ export async function resumeSession(sessionId: string) {
       totalPausedMinutes: session.totalPausedMinutes + pausedMinutes,
       updatedAt: new Date(),
     })
-    .where(eq(schema.gamingSessions.id, sessionId))
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)))
     .returning();
   refreshPaths();
   return updated;
 }
 
 export async function endSession(sessionId: string) {
-  const [session] = await db.select().from(schema.gamingSessions).where(eq(schema.gamingSessions.id, sessionId));
+  const { tenantId } = await requireTenantUser();
+  const [session] = await db
+    .select()
+    .from(schema.gamingSessions)
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)));
   if (!session) throw new Error("Session not found");
 
   const now = new Date();
@@ -277,25 +308,29 @@ export async function endSession(sessionId: string) {
       actualDurationMinutes,
       updatedAt: new Date(),
     })
-    .where(eq(schema.gamingSessions.id, sessionId))
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)))
     .returning();
 
   await db
     .update(schema.bookings)
     .set({ status: "COMPLETED", endTime: now, updatedAt: new Date() })
-    .where(eq(schema.bookings.id, session.bookingId));
+    .where(and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.id, session.bookingId)));
 
   await db
     .update(schema.stations)
     .set({ status: "AVAILABLE", updatedAt: new Date() })
-    .where(eq(schema.stations.id, session.stationId));
+    .where(and(eqTenant(schema.stations.tenantId, tenantId), eq(schema.stations.id, session.stationId)));
 
   refreshPaths();
   return updated;
 }
 
 export async function addExtraCharge(sessionId: string, amount: number, note?: string) {
-  const [session] = await db.select().from(schema.gamingSessions).where(eq(schema.gamingSessions.id, sessionId));
+  const { tenantId } = await requireTenantUser();
+  const [session] = await db
+    .select()
+    .from(schema.gamingSessions)
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)));
   if (!session) throw new Error("Session not found");
 
   const newExtra = round2(Number(session.extraCharges) + amount);
@@ -310,16 +345,19 @@ export async function addExtraCharge(sessionId: string, amount: number, note?: s
       extraChargesNotes: combinedNote || null,
       updatedAt: new Date(),
     })
-    .where(eq(schema.gamingSessions.id, sessionId))
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)))
     .returning();
 
-  const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.sessionId, sessionId));
+  const [payment] = await db
+    .select()
+    .from(schema.payments)
+    .where(and(eqTenant(schema.payments.tenantId, tenantId), eq(schema.payments.sessionId, sessionId)));
   if (payment) {
     const status = Number(payment.amountPaid) >= newTotal ? "PAID" : Number(payment.amountPaid) > 0 ? "PARTIALLY_PAID" : "PENDING";
     await db
       .update(schema.payments)
       .set({ totalAmount: newTotal.toString(), status, updatedAt: new Date() })
-      .where(eq(schema.payments.id, payment.id));
+      .where(and(eqTenant(schema.payments.tenantId, tenantId), eq(schema.payments.id, payment.id)));
   }
 
   refreshPaths();
@@ -327,23 +365,27 @@ export async function addExtraCharge(sessionId: string, amount: number, note?: s
 }
 
 export async function cancelSession(sessionId: string) {
-  const [session] = await db.select().from(schema.gamingSessions).where(eq(schema.gamingSessions.id, sessionId));
+  const { tenantId } = await requireTenantUser();
+  const [session] = await db
+    .select()
+    .from(schema.gamingSessions)
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)));
   if (!session) throw new Error("Session not found");
 
   await db
     .update(schema.gamingSessions)
     .set({ status: "CANCELLED", actualEndTime: new Date(), updatedAt: new Date() })
-    .where(eq(schema.gamingSessions.id, sessionId));
+    .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, sessionId)));
 
   await db
     .update(schema.bookings)
     .set({ status: "CANCELLED", cancelledAt: new Date(), updatedAt: new Date() })
-    .where(eq(schema.bookings.id, session.bookingId));
+    .where(and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.id, session.bookingId)));
 
   await db
     .update(schema.stations)
     .set({ status: "AVAILABLE", updatedAt: new Date() })
-    .where(eq(schema.stations.id, session.stationId));
+    .where(and(eqTenant(schema.stations.tenantId, tenantId), eq(schema.stations.id, session.stationId)));
 
   refreshPaths();
 }

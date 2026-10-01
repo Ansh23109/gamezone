@@ -1,8 +1,10 @@
 "use server";
 
 import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { eqTenant } from "@/lib/tenant/scope";
+import { requireTenantRole } from "@/lib/auth/session";
 
 function refreshPaths() {
   revalidatePath("/pricing");
@@ -25,9 +27,11 @@ export type PricingRuleInput = {
 };
 
 export async function createPricingRule(input: PricingRuleInput) {
+  const { tenantId } = await requireTenantRole(["ADMIN", "MANAGER"]);
   const [rule] = await db
     .insert(schema.pricingRules)
     .values({
+      tenantId,
       gameTypeId: input.gameTypeId,
       stationId: input.stationId || null,
       name: input.name,
@@ -46,6 +50,7 @@ export async function createPricingRule(input: PricingRuleInput) {
 }
 
 export async function updatePricingRule(id: string, input: Partial<PricingRuleInput> & { isActive?: boolean }) {
+  const { tenantId } = await requireTenantRole(["ADMIN", "MANAGER"]);
   const { price, ...rest } = input;
   const [updated] = await db
     .update(schema.pricingRules)
@@ -54,13 +59,14 @@ export async function updatePricingRule(id: string, input: Partial<PricingRuleIn
       ...(price !== undefined ? { price: price.toString() } : {}),
       updatedAt: new Date(),
     })
-    .where(eq(schema.pricingRules.id, id))
+    .where(and(eqTenant(schema.pricingRules.tenantId, tenantId), eq(schema.pricingRules.id, id)))
     .returning();
   refreshPaths();
   return updated;
 }
 
 export async function deletePricingRule(id: string) {
-  await db.delete(schema.pricingRules).where(eq(schema.pricingRules.id, id));
+  const { tenantId } = await requireTenantRole(["ADMIN", "MANAGER"]);
+  await db.delete(schema.pricingRules).where(and(eqTenant(schema.pricingRules.tenantId, tenantId), eq(schema.pricingRules.id, id)));
   refreshPaths();
 }

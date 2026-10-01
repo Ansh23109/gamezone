@@ -1,8 +1,10 @@
 "use server";
 
 import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { eqTenant } from "@/lib/tenant/scope";
+import { requireTenantRole } from "@/lib/auth/session";
 
 function slugify(name: string) {
   return name
@@ -26,9 +28,11 @@ export async function createGameType(input: {
   icon?: string;
   color?: string;
 }) {
+  const { tenantId } = await requireTenantRole(["ADMIN", "MANAGER"]);
   const [gameType] = await db
     .insert(schema.gameTypes)
     .values({
+      tenantId,
       name: input.name,
       slug: slugify(input.name),
       description: input.description,
@@ -44,16 +48,18 @@ export async function updateGameType(
   id: string,
   input: Partial<{ name: string; description: string | null; icon: string; color: string; isActive: boolean }>,
 ) {
+  const { tenantId } = await requireTenantRole(["ADMIN", "MANAGER"]);
   const [updated] = await db
     .update(schema.gameTypes)
     .set({ ...input, updatedAt: new Date() })
-    .where(eq(schema.gameTypes.id, id))
+    .where(and(eqTenant(schema.gameTypes.tenantId, tenantId), eq(schema.gameTypes.id, id)))
     .returning();
   refreshPaths();
   return updated;
 }
 
 export async function deleteGameType(id: string) {
-  await db.delete(schema.gameTypes).where(eq(schema.gameTypes.id, id));
+  const { tenantId } = await requireTenantRole(["ADMIN", "MANAGER"]);
+  await db.delete(schema.gameTypes).where(and(eqTenant(schema.gameTypes.tenantId, tenantId), eq(schema.gameTypes.id, id)));
   refreshPaths();
 }
