@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/format";
 import { previewPrice, type PricingRuleLike } from "@/lib/pricing-shared";
 import { startWalkInSession } from "@/lib/actions/sessions";
-import { useStaff } from "@/lib/context/staff-context";
 import { STATION_STATUS_STYLES } from "@/lib/constants";
 
 type GameType = { id: string; name: string; icon: string | null; color: string | null };
@@ -99,7 +98,6 @@ function WalkInModal({
   pricingRules: PricingRuleLike[];
 }) {
   const router = useRouter();
-  const { staff, currentStaffId, setCurrentStaffId } = useStaff();
   const [gameTypeId, setGameTypeId] = useState<string>(gameTypes[0]?.id ?? "");
   const [stationId, setStationId] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
@@ -157,7 +155,6 @@ function WalkInModal({
           gameTypeId,
           stationId: activeStationId,
           durationMinutes: effectiveMinutes,
-          staffId: currentStaffId || undefined,
           markPaid,
           paymentMethod,
         });
@@ -308,23 +305,6 @@ function WalkInModal({
                     {m}
                   </button>
                 ))}
-              </div>
-            )}
-
-            {staff.length > 0 && (
-              <div>
-                <Label>Staff</Label>
-                <select
-                  value={currentStaffId ?? ""}
-                  onChange={(e) => setCurrentStaffId(e.target.value)}
-                  className="h-9 w-full rounded-lg border border-border-strong bg-surface-2 px-3 text-sm text-foreground outline-none focus:border-accent"
-                >
-                  {staff.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
               </div>
             )}
 

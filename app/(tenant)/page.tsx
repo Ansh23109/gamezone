@@ -8,6 +8,7 @@ import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolveDateRange, type DateRangePreset } from "@/lib/date-range";
 import { formatCurrency, formatDuration, formatTime } from "@/lib/format";
 import { BOOKING_STATUS_STYLES } from "@/lib/constants";
+import { requireTenantUser } from "@/lib/auth/session";
 import Link from "next/link";
 
 export default async function DashboardPage({
@@ -15,12 +16,13 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
+  const { tenant } = await requireTenantUser();
   const sp = await searchParams;
   const preset = (sp.range as DateRangePreset) || "today";
   const range = resolveDateRange(preset, { from: sp.from, to: sp.to });
   let data;
   try {
-    data = await getDashboardData(range);
+    data = await getDashboardData(tenant.id, range);
   } catch (err) {
     // If data fetching fails (for example when DATABASE_URL is not set on Vercel),
     // render a helpful fallback so the site doesn't appear completely blank.

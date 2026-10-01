@@ -12,7 +12,6 @@ import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES } from "@/lib/constants";
 import { formatCurrency, formatDate, formatDateTime, formatDuration, formatTime } from "@/lib/format";
 import { checkInBooking, cancelBooking, markNoShow, rescheduleBooking } from "@/lib/actions/bookings";
 import { startSessionFromBooking } from "@/lib/actions/sessions";
-import { useStaff } from "@/lib/context/staff-context";
 import { toIstDateInputValue } from "@/lib/date-range";
 
 type BookingDetail = {
@@ -32,7 +31,6 @@ type BookingDetail = {
 
 export function BookingDetailModal({ booking, onClose }: { booking: BookingDetail; onClose: () => void }) {
   const router = useRouter();
-  const { currentStaffId } = useStaff();
   const [isPending, startTransition] = useTransition();
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [newDate, setNewDate] = useState(toIstDateInputValue(booking.startTime));
@@ -128,7 +126,7 @@ export function BookingDetailModal({ booking, onClose }: { booking: BookingDetai
                 size="sm"
                 variant="primary"
                 disabled={isPending}
-                onClick={() => run(() => startSessionFromBooking(booking.id, currentStaffId || undefined))}
+                onClick={() => run(() => startSessionFromBooking(booking.id))}
               >
                 <Play className="h-3.5 w-3.5" /> Start Session
               </Button>

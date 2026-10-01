@@ -4,20 +4,22 @@ import { listPricingRules } from "@/lib/queries/pricing";
 import { CalendarClient } from "@/components/calendar/calendar-client";
 import { toIstDateInputValue, istNow, dayBoundsForDateString, getIstParts } from "@/lib/date-range";
 import type { CalendarBooking } from "@/components/calendar/day-grid";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export default async function CalendarPage({
   searchParams,
 }: {
   searchParams: Promise<{ view?: string; date?: string; gameType?: string }>;
 }) {
+  const { tenant } = await requireTenantUser();
   const sp = await searchParams;
   const view = sp.view === "week" ? "week" : "day";
   const date = sp.date || toIstDateInputValue(istNow());
 
   const [gameTypes, stations, pricingRules] = await Promise.all([
-    listActiveGameTypes(),
-    listStations(),
-    listPricingRules(),
+    listActiveGameTypes(tenant.id),
+    listStations(tenant.id),
+    listPricingRules(tenant.id),
   ]);
   const gameTypeId = sp.gameType || gameTypes[0]?.id || "";
 
@@ -39,7 +41,7 @@ export default async function CalendarPage({
     rangeEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
   }
 
-  const bookings = await listBookings({ rangeStart, rangeEnd, gameTypeId });
+  const bookings = await listBookings(tenant.id, { rangeStart, rangeEnd, gameTypeId });
 
   const calendarBookings: CalendarBooking[] = bookings.map((b) => ({
     id: b.id,

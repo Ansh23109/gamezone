@@ -4,11 +4,13 @@ import { CustomersTable } from "@/components/customers/customers-table";
 import { listCustomersWithStats } from "@/lib/queries/customers";
 import { formatCurrency } from "@/lib/format";
 import { Wallet, Repeat, Clock } from "lucide-react";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage() {
-  const customers = await listCustomersWithStats();
+  const { tenant } = await requireTenantUser();
+  const customers = await listCustomersWithStats(tenant.id);
   const totalSpent = customers.reduce((sum, c) => sum + c.totalSpent, 0);
   const repeatCount = customers.filter((c) => c.totalVisits > 1).length;
   const totalHours = customers.reduce((sum, c) => sum + c.totalHours, 0);

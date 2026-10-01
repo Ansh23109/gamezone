@@ -3,20 +3,22 @@ import { listAllGameTypes, listStations } from "@/lib/queries/stations";
 import { listPricingRules } from "@/lib/queries/pricing";
 import { BookingsTable } from "@/components/bookings/bookings-table";
 import { toIstDateInputValue, istNow } from "@/lib/date-range";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export default async function BookingsPage({
   searchParams,
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
+  const { tenant } = await requireTenantUser();
   const sp = await searchParams;
   const date = sp.date || toIstDateInputValue(istNow());
 
   const [bookings, gameTypes, stations, pricingRules] = await Promise.all([
-    listBookings({ date }),
-    listAllGameTypes(),
-    listStations(),
-    listPricingRules(),
+    listBookings(tenant.id, { date }),
+    listAllGameTypes(tenant.id),
+    listStations(tenant.id),
+    listPricingRules(tenant.id),
   ]);
 
   return (

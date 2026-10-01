@@ -9,7 +9,6 @@ import { Input, Label, Select } from "@/components/ui/form";
 import { formatCurrency } from "@/lib/format";
 import { previewPrice, type PricingRuleLike } from "@/lib/pricing-shared";
 import { createBooking } from "@/lib/actions/bookings";
-import { useStaff } from "@/lib/context/staff-context";
 import { toIstDateInputValue } from "@/lib/date-range";
 
 type GameType = { id: string; name: string };
@@ -37,7 +36,6 @@ export function CreateBookingModal({
   defaultGameTypeId?: string;
 }) {
   const router = useRouter();
-  const { currentStaffId } = useStaff();
   const [gameTypeId, setGameTypeId] = useState(defaultGameTypeId || gameTypes[0]?.id || "");
   const [stationId, setStationId] = useState(defaultStationId || "");
   const [customerName, setCustomerName] = useState("");
@@ -80,7 +78,6 @@ export function CreateBookingModal({
           durationMinutes,
           paymentStatus,
           notes: notes || undefined,
-          createdById: currentStaffId || undefined,
         });
         onClose();
         router.refresh();

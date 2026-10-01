@@ -1,11 +1,17 @@
 import { listPricingRules } from "@/lib/queries/pricing";
 import { listAllGameTypes, listStations } from "@/lib/queries/stations";
 import { PricingManager } from "@/components/pricing/pricing-manager";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function PricingPage() {
-  const [rules, gameTypes, stations] = await Promise.all([listPricingRules(), listAllGameTypes(), listStations()]);
+  const { tenant } = await requireTenantUser();
+  const [rules, gameTypes, stations] = await Promise.all([
+    listPricingRules(tenant.id),
+    listAllGameTypes(tenant.id),
+    listStations(tenant.id),
+  ]);
 
   return (
     <div className="space-y-4">

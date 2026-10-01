@@ -68,14 +68,21 @@ function AddStaffModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"ADMIN" | "MANAGER" | "STAFF">("STAFF");
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function submit() {
-    if (!name.trim()) return;
+    setError(null);
+    if (!name.trim()) return setError("Enter a name.");
+    if (!email.trim()) return setError("Enter an email — it's how they'll log in.");
     startTransition(async () => {
-      await createStaff({ name, email: email || undefined, role });
-      router.refresh();
-      onClose();
+      try {
+        await createStaff({ name, email, role });
+        router.refresh();
+        onClose();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not add staff member.");
+      }
     });
   }
 
@@ -87,8 +94,8 @@ function AddStaffModal({ onClose }: { onClose: () => void }) {
           <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </div>
         <div>
-          <Label>Email (optional)</Label>
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
+          <Label>Email</Label>
+          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="they'll get an invite here" />
         </div>
         <div>
           <Label>Role</Label>
@@ -98,6 +105,7 @@ function AddStaffModal({ onClose }: { onClose: () => void }) {
             <option value="ADMIN">Admin</option>
           </Select>
         </div>
+        {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel

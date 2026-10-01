@@ -7,10 +7,12 @@ import { StatusBadge } from "@/components/ui/badge";
 import { getCustomerDetail } from "@/lib/queries/customers";
 import { formatCurrency, formatDateTime, formatDuration } from "@/lib/format";
 import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES, PAYMENT_METHOD_LABELS } from "@/lib/constants";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { tenant } = await requireTenantUser();
   const { id } = await params;
-  const detail = await getCustomerDetail(id);
+  const detail = await getCustomerDetail(tenant.id, id);
   if (!detail) notFound();
 
   const { customer, bookings, transactions, stats } = detail;

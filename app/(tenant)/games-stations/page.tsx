@@ -1,10 +1,12 @@
 import { listGameTypesWithStations } from "@/lib/queries/stations";
 import { GamesStationsManager } from "@/components/stations/games-stations-manager";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function GamesStationsPage() {
-  const gameTypes = await listGameTypesWithStations();
+  const { tenant } = await requireTenantUser();
+  const gameTypes = await listGameTypesWithStations(tenant.id);
 
   return (
     <div className="space-y-4">

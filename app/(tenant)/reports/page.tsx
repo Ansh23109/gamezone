@@ -8,6 +8,7 @@ import { getReportsData } from "@/lib/queries/reports";
 import { resolveDateRange, type DateRangePreset } from "@/lib/date-range";
 import { formatCurrency, formatDuration } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants";
+import { requireTenantUser } from "@/lib/auth/session";
 
 const METHOD_COLORS: Record<string, string> = { CASH: "#22c55e", UPI: "#38bdf8", CARD: "#7c5cff", OTHER: "#f59e0b" };
 
@@ -16,10 +17,11 @@ export default async function ReportsPage({
 }: {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
+  const { tenant } = await requireTenantUser();
   const sp = await searchParams;
   const preset = (sp.range as DateRangePreset) || "month";
   const range = resolveDateRange(preset, { from: sp.from, to: sp.to });
-  const data = await getReportsData(range);
+  const data = await getReportsData(tenant.id, range);
 
   const exportHref = `/api/reports/export?range=${preset}${sp.from ? `&from=${sp.from}` : ""}${sp.to ? `&to=${sp.to}` : ""}`;
 

@@ -1,11 +1,13 @@
 import { listActiveSessions } from "@/lib/queries/sessions";
 import { SessionCard } from "@/components/sessions/session-card";
 import { Zap } from "lucide-react";
+import { requireTenantUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ActiveSessionsPage() {
-  const sessions = await listActiveSessions();
+  const { tenant } = await requireTenantUser();
+  const sessions = await listActiveSessions(tenant.id);
 
   return (
     <div className="space-y-6">

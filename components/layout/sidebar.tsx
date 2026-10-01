@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -15,8 +16,11 @@ import {
   Settings,
   Joystick,
   X,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { signOut } from "@/lib/actions/auth";
+import type { Branding, CurrentUser } from "./app-shell";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -31,7 +35,17 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function Sidebar({ mobileOpen, onCloseMobile }: { mobileOpen: boolean; onCloseMobile: () => void }) {
+export function Sidebar({
+  mobileOpen,
+  onCloseMobile,
+  branding,
+  currentUser,
+}: {
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
+  branding: Branding;
+  currentUser: CurrentUser;
+}) {
   const pathname = usePathname();
 
   return (
@@ -46,12 +60,19 @@ export function Sidebar({ mobileOpen, onCloseMobile }: { mobileOpen: boolean; on
         )}
       >
         <div className="flex items-center justify-between px-5 h-16 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white glow-accent">
-              <Joystick className="h-4.5 w-4.5" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white glow-accent overflow-hidden"
+              style={{ backgroundColor: branding.primaryColor }}
+            >
+              {branding.logoSrc ? (
+                <Image src={branding.logoSrc} alt="" width={32} height={32} className="h-full w-full object-cover" />
+              ) : (
+                <Joystick className="h-4.5 w-4.5" />
+              )}
             </div>
-            <div>
-              <p className="text-sm font-semibold leading-tight text-foreground">GameZone</p>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold leading-tight text-foreground truncate">{branding.displayName}</p>
               <p className="text-[10px] text-muted-2 leading-tight">Management Console</p>
             </div>
           </div>
@@ -83,8 +104,22 @@ export function Sidebar({ mobileOpen, onCloseMobile }: { mobileOpen: boolean; on
           })}
         </nav>
 
-        <div className="border-t border-border p-4">
-          <p className="text-[11px] text-muted-2">GameZone Console v1.0</p>
+        <div className="border-t border-border p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-foreground truncate">{currentUser.name}</p>
+              <p className="text-[10px] text-muted-2 truncate">{currentUser.role}</p>
+            </div>
+            <form action={signOut}>
+              <button
+                type="submit"
+                title="Sign out"
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-foreground"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </form>
+          </div>
         </div>
       </aside>
     </>

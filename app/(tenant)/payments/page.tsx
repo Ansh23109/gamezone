@@ -8,6 +8,7 @@ import { listTransactions, getDailySalesSummary } from "@/lib/queries/payments";
 import { resolveDateRange, type DateRangePreset } from "@/lib/date-range";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants";
+import { requireTenantUser } from "@/lib/auth/session";
 
 const METHOD_COLORS: Record<string, string> = { CASH: "#22c55e", UPI: "#38bdf8", CARD: "#7c5cff", OTHER: "#f59e0b" };
 
@@ -16,11 +17,15 @@ export default async function PaymentsPage({
 }: {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
+  const { tenant } = await requireTenantUser();
   const sp = await searchParams;
   const preset = (sp.range as DateRangePreset) || "today";
   const range = resolveDateRange(preset, { from: sp.from, to: sp.to });
 
-  const [transactions, summary] = await Promise.all([listTransactions(range), getDailySalesSummary(range)]);
+  const [transactions, summary] = await Promise.all([
+    listTransactions(tenant.id, range),
+    getDailySalesSummary(tenant.id, range),
+  ]);
 
   return (
     <div className="space-y-6">
