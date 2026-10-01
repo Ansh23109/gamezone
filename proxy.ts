@@ -25,7 +25,14 @@ export async function proxy(request: NextRequest) {
   response.headers.set("x-host-mode", hostMode.kind);
 
   if (hostMode.kind === "admin") {
-    if (!isAuthenticated || appMetadata.role !== "OWNER") {
+    const isOwner = isAuthenticated && appMetadata.role === "OWNER";
+    if (request.nextUrl.pathname.startsWith("/login")) {
+      // Already signed in as OWNER -> skip the login page. Otherwise let it
+      // render — redirecting /login itself back to /login would loop forever.
+      if (isOwner) return redirectTo(request, "/admin", response);
+      return response;
+    }
+    if (!isOwner) {
       return redirectTo(request, "/login", response);
     }
     return response;
