@@ -49,6 +49,20 @@ if (!process.env.DATABASE_URL) {
       ssl: { rejectUnauthorized: false },
     });
 
+  // pg.Pool emits 'error' on a background/idle client whenever the server
+  // side drops it (a restart, the pooler reclaiming an idle connection,
+  // Supabase's own maintenance) — this is normal and expected, not a bug
+  // in any one request. Without a listener here, Node treats it as an
+  // unhandled EventEmitter error and crashes the whole process, taking
+  // down every in-flight request on that serverless instance instead of
+  // just failing the one query that happened to be on the dropped
+  // connection. The pool transparently opens a replacement connection on
+  // the next query, so logging and swallowing it here is the correct,
+  // standard node-postgres pattern (see the pg docs' Pool example).
+  pool.on("error", (err) => {
+    console.error("Postgres pool idle client error (connection dropped by server, pool will reconnect):", err.message);
+  });
+
   if (process.env.NODE_ENV !== "production") {
     global.__gzPool = pool;
   }
