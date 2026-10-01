@@ -77,11 +77,11 @@ export function NewTenantForm() {
         </div>
         <hr className="border-border" />
         <div>
-          <Label>First admin's name</Label>
+          <Label>First admin&apos;s name</Label>
           <Input value={adminName} onChange={(e) => setAdminName(e.target.value)} />
         </div>
         <div>
-          <Label>First admin's email</Label>
+          <Label>First admin&apos;s email</Label>
           <Input value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} type="email" placeholder="they'll get an invite here" />
         </div>
         {error && <p className="text-sm text-danger">{error}</p>}
