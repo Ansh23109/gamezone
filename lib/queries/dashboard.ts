@@ -1,10 +1,11 @@
 import { db, schema } from "@/db";
 import { and, gte, lt, eq, inArray, ne } from "drizzle-orm";
 import { round2 } from "@/lib/format";
+import { eqTenant } from "@/lib/tenant/scope";
 
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
-export async function getDashboardData(range: { start: Date; end: Date }) {
+export async function getDashboardData(tenantId: string, range: { start: Date; end: Date }) {
   const { start, end } = range;
 
   const [
@@ -17,20 +18,41 @@ export async function getDashboardData(range: { start: Date; end: Date }) {
     gameTypes,
     upcomingBookings,
   ] = await Promise.all([
-    db.select().from(schema.transactions).where(and(gte(schema.transactions.createdAt, start), lt(schema.transactions.createdAt, end))),
-    db.select().from(schema.bookings).where(and(gte(schema.bookings.startTime, start), lt(schema.bookings.startTime, end))),
     db
       .select()
-      .from(schema.gamingSessions)
-      .where(and(gte(schema.gamingSessions.actualStartTime, start), lt(schema.gamingSessions.actualStartTime, end))),
-    db.select().from(schema.gamingSessions).where(inArray(schema.gamingSessions.status, ["ACTIVE", "PAUSED"])),
-    db.select().from(schema.customers),
-    db.select().from(schema.stations).where(eq(schema.stations.isActive, true)),
-    db.select().from(schema.gameTypes).where(eq(schema.gameTypes.isActive, true)),
+      .from(schema.transactions)
+      .where(and(eqTenant(schema.transactions.tenantId, tenantId), gte(schema.transactions.createdAt, start), lt(schema.transactions.createdAt, end))),
     db
       .select()
       .from(schema.bookings)
-      .where(and(eq(schema.bookings.status, "UPCOMING"), gte(schema.bookings.startTime, new Date())))
+      .where(and(eqTenant(schema.bookings.tenantId, tenantId), gte(schema.bookings.startTime, start), lt(schema.bookings.startTime, end))),
+    db
+      .select()
+      .from(schema.gamingSessions)
+      .where(
+        and(
+          eqTenant(schema.gamingSessions.tenantId, tenantId),
+          gte(schema.gamingSessions.actualStartTime, start),
+          lt(schema.gamingSessions.actualStartTime, end),
+        ),
+      ),
+    db
+      .select()
+      .from(schema.gamingSessions)
+      .where(and(eqTenant(schema.gamingSessions.tenantId, tenantId), inArray(schema.gamingSessions.status, ["ACTIVE", "PAUSED"]))),
+    db.select().from(schema.customers).where(eqTenant(schema.customers.tenantId, tenantId)),
+    db.select().from(schema.stations).where(and(eqTenant(schema.stations.tenantId, tenantId), eq(schema.stations.isActive, true))),
+    db.select().from(schema.gameTypes).where(and(eqTenant(schema.gameTypes.tenantId, tenantId), eq(schema.gameTypes.isActive, true))),
+    db
+      .select()
+      .from(schema.bookings)
+      .where(
+        and(
+          eqTenant(schema.bookings.tenantId, tenantId),
+          eq(schema.bookings.status, "UPCOMING"),
+          gte(schema.bookings.startTime, new Date()),
+        ),
+      )
       .orderBy(schema.bookings.startTime)
       .limit(8),
   ]);

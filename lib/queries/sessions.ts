@@ -1,9 +1,10 @@
 import { db, schema } from "@/db";
-import { inArray, desc, eq } from "drizzle-orm";
+import { and, inArray, desc, eq } from "drizzle-orm";
+import { eqTenant } from "@/lib/tenant/scope";
 
-export async function listActiveSessions() {
+export async function listActiveSessions(tenantId: string) {
   return db.query.gamingSessions.findMany({
-    where: inArray(schema.gamingSessions.status, ["ACTIVE", "PAUSED"]),
+    where: and(eqTenant(schema.gamingSessions.tenantId, tenantId), inArray(schema.gamingSessions.status, ["ACTIVE", "PAUSED"])),
     orderBy: [desc(schema.gamingSessions.actualStartTime)],
     with: {
       customer: true,
@@ -14,15 +15,16 @@ export async function listActiveSessions() {
   });
 }
 
-export async function getSessionById(id: string) {
+export async function getSessionById(tenantId: string, id: string) {
   return db.query.gamingSessions.findFirst({
-    where: eq(schema.gamingSessions.id, id),
+    where: and(eqTenant(schema.gamingSessions.tenantId, tenantId), eq(schema.gamingSessions.id, id)),
     with: { customer: true, gameType: true, station: true, payment: true, booking: true },
   });
 }
 
-export async function listRecentSessions(limit = 20) {
+export async function listRecentSessions(tenantId: string, limit = 20) {
   return db.query.gamingSessions.findMany({
+    where: eqTenant(schema.gamingSessions.tenantId, tenantId),
     orderBy: [desc(schema.gamingSessions.createdAt)],
     limit,
     with: { customer: true, gameType: true, station: true },

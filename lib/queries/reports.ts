@@ -1,19 +1,32 @@
 import { db, schema } from "@/db";
 import { and, gte, lt } from "drizzle-orm";
 import { round2 } from "@/lib/format";
+import { eqTenant } from "@/lib/tenant/scope";
 
-export async function getReportsData(range: { start: Date; end: Date }) {
+export async function getReportsData(tenantId: string, range: { start: Date; end: Date }) {
   const { start, end } = range;
 
   const [transactions, sessions, bookings, stations, gameTypes] = await Promise.all([
-    db.select().from(schema.transactions).where(and(gte(schema.transactions.createdAt, start), lt(schema.transactions.createdAt, end))),
+    db
+      .select()
+      .from(schema.transactions)
+      .where(and(eqTenant(schema.transactions.tenantId, tenantId), gte(schema.transactions.createdAt, start), lt(schema.transactions.createdAt, end))),
     db
       .select()
       .from(schema.gamingSessions)
-      .where(and(gte(schema.gamingSessions.actualStartTime, start), lt(schema.gamingSessions.actualStartTime, end))),
-    db.select().from(schema.bookings).where(and(gte(schema.bookings.startTime, start), lt(schema.bookings.startTime, end))),
-    db.select().from(schema.stations),
-    db.select().from(schema.gameTypes),
+      .where(
+        and(
+          eqTenant(schema.gamingSessions.tenantId, tenantId),
+          gte(schema.gamingSessions.actualStartTime, start),
+          lt(schema.gamingSessions.actualStartTime, end),
+        ),
+      ),
+    db
+      .select()
+      .from(schema.bookings)
+      .where(and(eqTenant(schema.bookings.tenantId, tenantId), gte(schema.bookings.startTime, start), lt(schema.bookings.startTime, end))),
+    db.select().from(schema.stations).where(eqTenant(schema.stations.tenantId, tenantId)),
+    db.select().from(schema.gameTypes).where(eqTenant(schema.gameTypes.tenantId, tenantId)),
   ]);
 
   const gameTypeById = new Map(gameTypes.map((g) => [g.id, g]));
@@ -116,7 +129,7 @@ export async function getReportsData(range: { start: Date; end: Date }) {
   }
 
   // Repeat customers: customers with >1 completed session ever (not just in range)
-  const allSessions = await db.select().from(schema.gamingSessions);
+  const allSessions = await db.select().from(schema.gamingSessions).where(eqTenant(schema.gamingSessions.tenantId, tenantId));
   const sessionCountByCustomer = new Map<string, number>();
   for (const s of allSessions.filter((s) => s.status === "COMPLETED")) {
     sessionCountByCustomer.set(s.customerId, (sessionCountByCustomer.get(s.customerId) ?? 0) + 1);

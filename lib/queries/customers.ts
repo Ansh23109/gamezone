@@ -1,17 +1,22 @@
 import { db, schema } from "@/db";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { round2 } from "@/lib/format";
+import { eqTenant } from "@/lib/tenant/scope";
 
 export type CustomerWithStats = Awaited<ReturnType<typeof listCustomersWithStats>>[number];
 
 /** Computes real, on-the-fly stats per customer from sessions/transactions —
  * nothing is cached on the Customer row, so it can never drift out of sync. */
-export async function listCustomersWithStats() {
+export async function listCustomersWithStats(tenantId: string) {
   const [customers, sessions, transactions, gameTypes] = await Promise.all([
-    db.select().from(schema.customers).orderBy(desc(schema.customers.createdAt)),
-    db.select().from(schema.gamingSessions),
-    db.select().from(schema.transactions),
-    db.select().from(schema.gameTypes),
+    db
+      .select()
+      .from(schema.customers)
+      .where(eqTenant(schema.customers.tenantId, tenantId))
+      .orderBy(desc(schema.customers.createdAt)),
+    db.select().from(schema.gamingSessions).where(eqTenant(schema.gamingSessions.tenantId, tenantId)),
+    db.select().from(schema.transactions).where(eqTenant(schema.transactions.tenantId, tenantId)),
+    db.select().from(schema.gameTypes).where(eqTenant(schema.gameTypes.tenantId, tenantId)),
   ]);
 
   const gameTypeById = new Map(gameTypes.map((g) => [g.id, g]));
@@ -55,18 +60,21 @@ export async function listCustomersWithStats() {
   });
 }
 
-export async function getCustomerDetail(id: string) {
-  const [customer] = await db.select().from(schema.customers).where(eq(schema.customers.id, id));
+export async function getCustomerDetail(tenantId: string, id: string) {
+  const [customer] = await db
+    .select()
+    .from(schema.customers)
+    .where(and(eqTenant(schema.customers.tenantId, tenantId), eq(schema.customers.id, id)));
   if (!customer) return null;
 
   const bookings = await db.query.bookings.findMany({
-    where: eq(schema.bookings.customerId, id),
+    where: and(eqTenant(schema.bookings.tenantId, tenantId), eq(schema.bookings.customerId, id)),
     orderBy: [desc(schema.bookings.startTime)],
     with: { gameType: true, station: true, session: true, payment: true },
   });
 
   const transactions = await db.query.transactions.findMany({
-    where: eq(schema.transactions.customerId, id),
+    where: and(eqTenant(schema.transactions.tenantId, tenantId), eq(schema.transactions.customerId, id)),
     orderBy: [desc(schema.transactions.createdAt)],
     with: { gameType: true, station: true },
   });
