@@ -2,14 +2,20 @@
 // Demo data seed — realistic Indian gaming-center data so the dashboard,
 // calendar, reports and customer profiles all look complete immediately.
 //
-// Run with: npm run db:seed
+// Seeds ONE tenant, resolved/created by slug from the SEED_TENANT_SLUG env
+// var (defaults to "demo" — deliberately NOT "ppp", the real production
+// tenant, so this never gets run against live customer data by accident).
+// Only that tenant's rows are cleared first, never the whole table — this
+// script runs in a database shared by multiple tenants now.
+//
+// Run with: SEED_TENANT_SLUG=demo npx tsx db/seed.ts
 // ============================================================================
 import "dotenv/config";
 import { db, schema } from "./index";
 import { calculatePrice } from "../lib/pricing";
 import { findConflictingBookings } from "../lib/availability";
 import { round2 } from "../lib/format";
-import { sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Small seeded RNG so re-running the seed produces a stable-feeling dataset.
@@ -73,25 +79,46 @@ function randomMobile(usedMobiles: Set<string>): string {
 }
 
 async function main() {
-  console.log("🌱 Seeding Gaming Zone database...");
+  const slug = process.env.SEED_TENANT_SLUG || "demo";
+  console.log(`🌱 Seeding Gaming Zone database for tenant "${slug}"...`);
 
-  console.log("Clearing existing data...");
-  await db.execute(sql`TRUNCATE TABLE
-    transactions, payments, gaming_sessions, bookings,
-    pricing_rules, stations, game_types, customers, users
-    RESTART IDENTITY CASCADE`);
+  let [tenant] = await db.select().from(schema.tenants).where(eq(schema.tenants.slug, slug));
+  if (!tenant) {
+    console.log(`Tenant "${slug}" doesn't exist yet — creating it...`);
+    [tenant] = await db
+      .insert(schema.tenants)
+      .values({ slug, subdomain: slug, displayName: `${slug} Gaming Center` })
+      .returning();
+  }
+  const tenantId = tenant.id;
+
+  console.log(`Clearing existing data for tenant "${slug}" only (other tenants' data is untouched)...`);
+  // Order matters for FK constraints: children before parents.
+  await db.delete(schema.transactions).where(eq(schema.transactions.tenantId, tenantId));
+  await db.delete(schema.payments).where(eq(schema.payments.tenantId, tenantId));
+  await db.delete(schema.gamingSessions).where(eq(schema.gamingSessions.tenantId, tenantId));
+  await db.delete(schema.bookings).where(eq(schema.bookings.tenantId, tenantId));
+  await db.delete(schema.pricingRules).where(eq(schema.pricingRules.tenantId, tenantId));
+  await db.delete(schema.stations).where(eq(schema.stations.tenantId, tenantId));
+  await db.delete(schema.gameTypes).where(eq(schema.gameTypes.tenantId, tenantId));
+  await db.delete(schema.customers).where(eq(schema.customers.tenantId, tenantId));
+  await db.delete(schema.users).where(eq(schema.users.tenantId, tenantId));
 
   // --------------------------------------------------------------------
   // Staff
   // --------------------------------------------------------------------
+  // Note: these have no Supabase Auth login (authUserId left null) — this
+  // script seeds operational data, not credentials. Use the /admin console's
+  // tenant-onboarding flow (lib/actions/users.ts createStaff) to invite real
+  // staff with a working login for this tenant.
   console.log("Creating staff...");
   const staff = await db
     .insert(schema.users)
     .values([
-      { name: "Rohit Malhotra", email: "rohit@gamezone.in", role: "ADMIN" },
-      { name: "Ayesha Khan", email: "ayesha@gamezone.in", role: "MANAGER" },
-      { name: "Vikram Singh", email: "vikram@gamezone.in", role: "STAFF" },
-      { name: "Priyanka Nair", email: "priyanka@gamezone.in", role: "STAFF" },
+      { tenantId, name: "Rohit Malhotra", email: "rohit@gamezone.in", role: "ADMIN" },
+      { tenantId, name: "Ayesha Khan", email: "ayesha@gamezone.in", role: "MANAGER" },
+      { tenantId, name: "Vikram Singh", email: "vikram@gamezone.in", role: "STAFF" },
+      { tenantId, name: "Priyanka Nair", email: "priyanka@gamezone.in", role: "STAFF" },
     ])
     .returning();
 
@@ -100,11 +127,11 @@ async function main() {
   // --------------------------------------------------------------------
   console.log("Creating game types...");
   const gameTypeDefs = [
-    { name: "PS5", slug: "ps5", icon: "gamepad-2", color: "#6366f1", description: "PlayStation 5 stations", sortOrder: 1 },
-    { name: "PS4", slug: "ps4", icon: "gamepad-2", color: "#8b5cf6", description: "PlayStation 4 stations", sortOrder: 2 },
-    { name: "Pool", slug: "pool", icon: "circle-dot", color: "#10b981", description: "8-ball pool tables", sortOrder: 3 },
-    { name: "Racing", slug: "racing", icon: "car", color: "#f59e0b", description: "Racing simulator rigs", sortOrder: 4 },
-    { name: "Arcade", slug: "arcade", icon: "joystick", color: "#ec4899", description: "Arcade cabinet games", sortOrder: 5 },
+    { tenantId, name: "PS5", slug: "ps5", icon: "gamepad-2", color: "#6366f1", description: "PlayStation 5 stations", sortOrder: 1 },
+    { tenantId, name: "PS4", slug: "ps4", icon: "gamepad-2", color: "#8b5cf6", description: "PlayStation 4 stations", sortOrder: 2 },
+    { tenantId, name: "Pool", slug: "pool", icon: "circle-dot", color: "#10b981", description: "8-ball pool tables", sortOrder: 3 },
+    { tenantId, name: "Racing", slug: "racing", icon: "car", color: "#f59e0b", description: "Racing simulator rigs", sortOrder: 4 },
+    { tenantId, name: "Arcade", slug: "arcade", icon: "joystick", color: "#ec4899", description: "Arcade cabinet games", sortOrder: 5 },
   ];
   const gameTypes = await db.insert(schema.gameTypes).values(gameTypeDefs).returning();
   const gt = Object.fromEntries(gameTypes.map((g) => [g.slug, g]));
@@ -114,11 +141,12 @@ async function main() {
   // --------------------------------------------------------------------
   console.log("Creating stations...");
   const stationDefs = [
-    ...["01", "02", "03", "04"].map((n) => ({ name: `PS5-${n}`, gameTypeId: gt.ps5.id, location: "Zone A" })),
-    ...["01", "02", "03"].map((n) => ({ name: `PS4-${n}`, gameTypeId: gt.ps4.id, location: "Zone A" })),
-    ...["01", "02"].map((n) => ({ name: `Pool Table ${n}`, gameTypeId: gt.pool.id, location: "Zone B", capacity: 4 })),
-    ...["01", "02"].map((n) => ({ name: `Racing Simulator ${n}`, gameTypeId: gt.racing.id, location: "Zone C" })),
+    ...["01", "02", "03", "04"].map((n) => ({ tenantId, name: `PS5-${n}`, gameTypeId: gt.ps5.id, location: "Zone A" })),
+    ...["01", "02", "03"].map((n) => ({ tenantId, name: `PS4-${n}`, gameTypeId: gt.ps4.id, location: "Zone A" })),
+    ...["01", "02"].map((n) => ({ tenantId, name: `Pool Table ${n}`, gameTypeId: gt.pool.id, location: "Zone B", capacity: 4 })),
+    ...["01", "02"].map((n) => ({ tenantId, name: `Racing Simulator ${n}`, gameTypeId: gt.racing.id, location: "Zone C" })),
     ...Array.from({ length: 8 }, (_, i) => ({
+      tenantId,
       name: `Arcade ${String(i + 1).padStart(2, "0")}`,
       gameTypeId: gt.arcade.id,
       location: "Zone D",
@@ -137,13 +165,13 @@ async function main() {
   // --------------------------------------------------------------------
   console.log("Creating pricing rules...");
   await db.insert(schema.pricingRules).values([
-    { gameTypeId: gt.ps5.id, name: "PS5 Standard", unit: "PER_HOUR", durationMinutes: 60, price: "150", tier: "STANDARD", priority: 0 },
-    { gameTypeId: gt.ps5.id, name: "PS5 Peak (Fri-Sun evening)", unit: "PER_HOUR", durationMinutes: 60, price: "200", tier: "PEAK", daysOfWeek: [0, 5, 6], startTime: "18:00", endTime: "23:00", priority: 1 },
-    { gameTypeId: gt.ps4.id, name: "PS4 Standard", unit: "PER_HOUR", durationMinutes: 60, price: "100", tier: "STANDARD", priority: 0 },
-    { gameTypeId: gt.pool.id, name: "Pool Standard", unit: "PER_HOUR", durationMinutes: 60, price: "300", tier: "STANDARD", priority: 0 },
-    { gameTypeId: gt.racing.id, name: "Racing Standard", unit: "PER_30_MIN", durationMinutes: 30, price: "200", tier: "STANDARD", priority: 0 },
-    { gameTypeId: gt.racing.id, name: "Racing Peak (Fri-Sun evening)", unit: "PER_30_MIN", durationMinutes: 30, price: "250", tier: "PEAK", daysOfWeek: [0, 5, 6], startTime: "18:00", endTime: "23:00", priority: 1 },
-    { gameTypeId: gt.arcade.id, name: "Arcade Standard", unit: "PER_GAME", durationMinutes: 10, price: "50", tier: "STANDARD", priority: 0 },
+    { tenantId, gameTypeId: gt.ps5.id, name: "PS5 Standard", unit: "PER_HOUR", durationMinutes: 60, price: "150", tier: "STANDARD", priority: 0 },
+    { tenantId, gameTypeId: gt.ps5.id, name: "PS5 Peak (Fri-Sun evening)", unit: "PER_HOUR", durationMinutes: 60, price: "200", tier: "PEAK", daysOfWeek: [0, 5, 6], startTime: "18:00", endTime: "23:00", priority: 1 },
+    { tenantId, gameTypeId: gt.ps4.id, name: "PS4 Standard", unit: "PER_HOUR", durationMinutes: 60, price: "100", tier: "STANDARD", priority: 0 },
+    { tenantId, gameTypeId: gt.pool.id, name: "Pool Standard", unit: "PER_HOUR", durationMinutes: 60, price: "300", tier: "STANDARD", priority: 0 },
+    { tenantId, gameTypeId: gt.racing.id, name: "Racing Standard", unit: "PER_30_MIN", durationMinutes: 30, price: "200", tier: "STANDARD", priority: 0 },
+    { tenantId, gameTypeId: gt.racing.id, name: "Racing Peak (Fri-Sun evening)", unit: "PER_30_MIN", durationMinutes: 30, price: "250", tier: "PEAK", daysOfWeek: [0, 5, 6], startTime: "18:00", endTime: "23:00", priority: 1 },
+    { tenantId, gameTypeId: gt.arcade.id, name: "Arcade Standard", unit: "PER_GAME", durationMinutes: 10, price: "50", tier: "STANDARD", priority: 0 },
   ]);
 
   // --------------------------------------------------------------------
@@ -152,6 +180,7 @@ async function main() {
   console.log("Creating customers...");
   const usedMobiles = new Set<string>();
   const customerDefs = Array.from({ length: 45 }, () => ({
+    tenantId,
     name: randomCustomerName(),
     mobile: randomMobile(usedMobiles),
   }));
@@ -235,7 +264,7 @@ async function main() {
       let station = null;
       for (let attempt = 0; attempt < 4; attempt++) {
         const candidate = randChoice(gameStations);
-        const conflicts = await findConflictingBookings({
+        const conflicts = await findConflictingBookings(tenantId, {
           stationId: candidate.id,
           startTime,
           endTime,
@@ -248,7 +277,7 @@ async function main() {
       if (!station) continue; // skip this slot, station genuinely busy
 
       const customer = randChoice(customers);
-      const { amount: price } = await calculatePrice({ gameTypeId: gameType.id, stationId: station.id, startTime, durationMinutes });
+      const { amount: price } = await calculatePrice(tenantId, { gameTypeId: gameType.id, stationId: station.id, startTime, durationMinutes });
       const finalPrice = price > 0 ? price : durationMinutes; // guard, should never hit
 
       // Decide status.
@@ -279,6 +308,7 @@ async function main() {
       const [booking] = await db
         .insert(schema.bookings)
         .values({
+          tenantId,
           customerId: customer.id,
           gameTypeId: gameType.id,
           stationId: station.id,
@@ -308,6 +338,7 @@ async function main() {
         const [s] = await db
           .insert(schema.gamingSessions)
           .values({
+            tenantId,
             bookingId: booking.id,
             customerId: customer.id,
             gameTypeId: gameType.id,
@@ -356,6 +387,7 @@ async function main() {
       const [payment] = await db
         .insert(schema.payments)
         .values({
+          tenantId,
           bookingId: booking.id,
           sessionId: session?.id ?? null,
           customerId: customer.id,
@@ -367,6 +399,7 @@ async function main() {
 
       if (amountPaid > 0) {
         await db.insert(schema.transactions).values({
+          tenantId,
           paymentId: payment.id,
           bookingId: booking.id,
           sessionId: session?.id ?? null,
@@ -381,9 +414,9 @@ async function main() {
       }
 
       if (status === "CANCELLED" || status === "COMPLETED" || status === "NO_SHOW") {
-        await db.update(schema.stations).set({ status: "AVAILABLE" }).where(sql`${schema.stations.id} = ${station.id}`);
+        await db.update(schema.stations).set({ status: "AVAILABLE" }).where(eq(schema.stations.id, station.id));
       } else if (status === "ACTIVE") {
-        await db.update(schema.stations).set({ status: "ACTIVE" }).where(sql`${schema.stations.id} = ${station.id}`);
+        await db.update(schema.stations).set({ status: "ACTIVE" }).where(eq(schema.stations.id, station.id));
       } else if (status === "UPCOMING" || status === "CHECKED_IN") {
         // leave AVAILABLE — the booking itself represents the future hold
       }
@@ -394,9 +427,12 @@ async function main() {
 
   // A couple of stations parked in maintenance to demo that state.
   const arcadeStations = stationsByGameType.get(gt.arcade.id)!;
-  await db.update(schema.stations).set({ status: "MAINTENANCE", notes: "Screen flicker — technician called" }).where(sql`${schema.stations.id} = ${arcadeStations[arcadeStations.length - 1].id}`);
+  await db
+    .update(schema.stations)
+    .set({ status: "MAINTENANCE", notes: "Screen flicker — technician called" })
+    .where(eq(schema.stations.id, arcadeStations[arcadeStations.length - 1].id));
 
-  console.log(`✅ Seed complete — ${totalCreated} bookings created across staff:${staff.length}, gameTypes:${gameTypes.length}, stations:${stations.length}, customers:${customers.length}`);
+  console.log(`✅ Seed complete for tenant "${slug}" — ${totalCreated} bookings created across staff:${staff.length}, gameTypes:${gameTypes.length}, stations:${stations.length}, customers:${customers.length}`);
   process.exit(0);
 }
 
