@@ -1,24 +1,26 @@
 import { ImageResponse } from "next/og";
 import { headers } from "next/headers";
-import { getTenantBySlug } from "./resolve";
+import { resolveHostMode, getTenantBySlug } from "./resolve";
 
 /**
  * Shared renderer behind app/icon.tsx, app/apple-icon.tsx, and the two PWA
  * manifest icon routes — one place for the glyph so all four stay visually
- * consistent. Reads tenant branding straight from the x-tenant-slug header
- * proxy.ts sets (not getTenantContext()/requireTenantUser() — icons must
- * render pre-login too, e.g. on the login page itself).
+ * consistent. These routes are deliberately excluded from proxy.ts's
+ * matcher (they must be fetchable pre-auth, e.g. on the login page), which
+ * means proxy never runs for them and never sets its x-host-mode/
+ * x-tenant-slug headers — so this resolves the host itself from the raw
+ * `host` header (always present regardless of proxy) rather than depending
+ * on those.
  */
 export async function renderBrandIcon(size: number) {
   const h = await headers();
-  const isAdminHost = h.get("x-host-mode") === "admin";
-  const slug = h.get("x-tenant-slug");
+  const hostMode = resolveHostMode(h.get("host"));
 
   let primaryColor = "#6366f1";
-  if (isAdminHost) {
+  if (hostMode.kind === "admin") {
     primaryColor = "#111111";
-  } else if (slug) {
-    const tenant = await getTenantBySlug(slug);
+  } else if (hostMode.kind === "tenant") {
+    const tenant = await getTenantBySlug(hostMode.slug);
     if (tenant) primaryColor = tenant.primaryColor;
   }
 

@@ -1,19 +1,21 @@
 import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
-import { getTenantBySlug } from "@/lib/tenant/resolve";
+import { resolveHostMode, getTenantBySlug } from "@/lib/tenant/resolve";
 
 // Next.js only supports one app/manifest.ts per app (it's not a per-segment
-// convention like icon.tsx), so this branches on the x-host-mode/
-// x-tenant-slug headers proxy.ts sets to serve the right identity for
-// whichever host requested it — the tenant app or the owner console.
-// Calling headers() makes this dynamic/request-time rather than the
+// convention like icon.tsx), so this branches on the requesting host to
+// serve the right identity for the tenant app vs. the owner console.
+// Resolved directly from the raw `host` header (via resolveHostMode), NOT
+// the x-host-mode/x-tenant-slug headers proxy.ts sets — this route is
+// deliberately excluded from proxy's matcher (must be fetchable pre-auth),
+// so proxy never runs for it and those headers are never set. Calling
+// headers() also makes this dynamic/request-time rather than the
 // cached-by-default static manifest Next.js would otherwise produce.
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const h = await headers();
-  const isAdminHost = h.get("x-host-mode") === "admin";
-  const slug = h.get("x-tenant-slug");
+  const hostMode = resolveHostMode(h.get("host"));
 
-  if (isAdminHost) {
+  if (hostMode.kind === "admin") {
     return {
       name: "Owner Console",
       short_name: "Owner Console",
@@ -29,7 +31,7 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     };
   }
 
-  const tenant = slug ? await getTenantBySlug(slug) : null;
+  const tenant = hostMode.kind === "tenant" ? await getTenantBySlug(hostMode.slug) : null;
   const displayName = tenant?.displayName ?? "Gaming Center Management";
   const primaryColor = tenant?.primaryColor ?? "#6366f1";
 
