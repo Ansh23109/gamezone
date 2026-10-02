@@ -1,14 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import StaticLanding from "@/components/static-landing";
+import { PwaRegister } from "@/components/pwa-register";
 
 // Fallback metadata for routes that don't set their own (e.g. /login, the
-// DB-missing fallback below) — (tenant)/layout.tsx overrides this per-tenant
-// via generateMetadata() once a tenant is resolved.
+// DB-missing fallback below) — (tenant)/layout.tsx and app/admin/layout.tsx
+// override this per-tenant/console via their own generateMetadata/metadata.
 export const metadata: Metadata = {
   title: "Gaming Center Management",
   description: "Booking, sessions and revenue management for gaming centers.",
+  appleWebApp: { statusBarStyle: "black-translucent" },
 };
+
+export const viewport: Viewport = { themeColor: "#6366f1" };
 
 // This is the ONE root layout shared by (auth), (tenant) and admin routes —
 // it must stay minimal (no data fetching, no per-tenant branding) since it
@@ -33,7 +37,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
 
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full font-sans">{children}</body>
+      <body className="min-h-full font-sans">
+        {children}
+        <PwaRegister />
+      </body>
     </html>
   );
 }

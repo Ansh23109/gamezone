@@ -38,6 +38,14 @@ export async function proxy(request: NextRequest) {
     if (!isOwner) {
       return redirectTo(request, "/login", response);
     }
+    // Admin host only ever serves /admin/* (plus the public auth paths
+    // above) — anything else (bare "/", or a tenant-only path like
+    // /bookings) would otherwise fall through to app/(tenant)/page.tsx's
+    // requireTenantUser(), which always throws for OWNER (no tenant `users`
+    // row, by design — see the comment below).
+    if (!request.nextUrl.pathname.startsWith("/admin")) {
+      return redirectTo(request, "/admin", response);
+    }
     return response;
   }
 
@@ -107,7 +115,10 @@ export const config = {
      * - /api/webhooks/* (unauthenticated third parties, verified by their own signature)
      * - Next.js internals and static assets
      * - /brands/* logo files served from public/
+     * - PWA assets (icon, apple-icon, manifest, pwa-icon-192/512, sw.js) —
+     *   must be fetchable by the browser's install-prompt logic and even on
+     *   the login page itself, regardless of auth state.
      */
-    "/((?!api/webhooks|_next/static|_next/image|favicon.ico|brands/).*)",
+    "/((?!api/webhooks|_next/static|_next/image|favicon.ico|brands/|icon$|apple-icon$|manifest.webmanifest|pwa-icon-|sw.js).*)",
   ],
 };

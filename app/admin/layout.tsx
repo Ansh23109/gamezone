@@ -1,8 +1,17 @@
+import type { Metadata, Viewport } from "next";
 import { Shield } from "lucide-react";
 import { requireOwner } from "@/lib/auth/session";
 import { signOut } from "@/lib/actions/auth";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Owner Console",
+  description: "Cross-tenant administration",
+  appleWebApp: { title: "Owner Console", statusBarStyle: "black-translucent" },
+};
+
+export const viewport: Viewport = { themeColor: "#111111" };
 
 // Cross-tenant owner console — reachable only at admin.edgeweb.co (gated at
 // the host level by proxy.ts), re-checked here per Next's own guidance to

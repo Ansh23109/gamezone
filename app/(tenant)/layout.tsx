@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { AppShell } from "@/components/layout/app-shell";
 import { listActiveGameTypes, listStations } from "@/lib/queries/stations";
 import { listPricingRules } from "@/lib/queries/pricing";
@@ -14,7 +14,21 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: `${tenant.displayName} — Gaming Center Management`,
     description: "Booking, sessions and revenue management for gaming centers.",
+    // manifest is auto-linked from app/manifest.ts; appleWebApp emits both
+    // mobile-web-app-capable and apple-mobile-web-app-title, which together
+    // with the manifest is what lets iOS/Android actually offer
+    // "Add to Home Screen" / install as an app.
+    appleWebApp: { title: tenant.displayName, statusBarStyle: "black-translucent" },
   };
+}
+
+// generateViewport (not the static `viewport` export) since it needs the
+// per-tenant color from requireTenantUser() — this layout is already fully
+// dynamic (force-dynamic above), so the "can't stream" tradeoff noted in
+// Next's docs doesn't cost anything extra here.
+export async function generateViewport(): Promise<Viewport> {
+  const { tenant } = await requireTenantUser();
+  return { themeColor: tenant.primaryColor };
 }
 
 export default async function TenantLayout({ children }: LayoutProps<"/">) {
