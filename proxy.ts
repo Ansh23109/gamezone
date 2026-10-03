@@ -18,12 +18,38 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const { supabase, response } = createMiddlewareClient(request);
+  const { supabase, response: supabaseResponse } = createMiddlewareClient(request);
   const { data, error } = await supabase.auth.getClaims();
   const isAuthenticated = !error && !!data;
   const appMetadata = (data?.claims.app_metadata ?? {}) as { role?: string; tenantId?: string };
 
-  response.headers.set("x-host-mode", hostMode.kind);
+  // x-host-mode/x-tenant-id/x-tenant-slug are how downstream Server
+  // Components (lib/tenant/context.ts's getTenantContext) learn which
+  // tenant/host resolved here, without a second DB lookup. Per Next's own
+  // docs (01-app/03-api-reference/03-file-conventions/proxy.md, "Setting
+  // Headers" section): these MUST be set via `request.headers` and passed
+  // through `NextResponse.next({ request: { headers } })` — setting them on
+  // `response.headers` instead (what this file did originally) only sends
+  // them back to the *browser*, never forwards them to the render. That bug
+  // caused intermittent "Not authenticated" errors in production (some
+  // request shapes apparently got the request-header treatment anyway,
+  // explaining why it mostly appeared to work) — `continueWith()` below is
+  // now the one path that builds a "keep rendering" response, so this can't
+  // regress silently in one branch while looking fixed in another.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-host-mode", hostMode.kind);
+
+  function continueWith(extraHeaders?: Record<string, string>) {
+    for (const [key, value] of Object.entries(extraHeaders ?? {})) {
+      requestHeaders.set(key, value);
+    }
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    // Carry over any session cookies Supabase refreshed on supabaseResponse.
+    for (const cookie of supabaseResponse.cookies.getAll()) {
+      res.cookies.set(cookie);
+    }
+    return res;
+  }
 
   if (hostMode.kind === "admin") {
     const isOwner = isAuthenticated && appMetadata.role === "OWNER";
@@ -32,12 +58,12 @@ export async function proxy(request: NextRequest) {
       // let these render — redirecting /login (or /accept-invite, reached
       // pre-auth from an invite email link) back to /login would loop.
       if (isOwner && request.nextUrl.pathname.startsWith("/login")) {
-        return redirectTo(request, "/admin", response);
+        return redirectTo(request, "/admin", supabaseResponse);
       }
-      return response;
+      return continueWith();
     }
     if (!isOwner) {
-      return redirectTo(request, "/login", response);
+      return redirectTo(request, "/login", supabaseResponse);
     }
     // Admin host only ever serves /admin/* (plus the public auth paths
     // above) — anything else (bare "/", or a tenant-only path like
@@ -45,9 +71,9 @@ export async function proxy(request: NextRequest) {
     // requireTenantUser(), which always throws for OWNER (no tenant `users`
     // row, by design — see the comment below).
     if (!request.nextUrl.pathname.startsWith("/admin")) {
-      return redirectTo(request, "/admin", response);
+      return redirectTo(request, "/admin", supabaseResponse);
     }
-    return response;
+    return continueWith();
   }
 
   // hostMode.kind === "tenant"
@@ -59,8 +85,7 @@ export async function proxy(request: NextRequest) {
     return new NextResponse("This console is currently unavailable. Contact support.", { status: 503 });
   }
 
-  response.headers.set("x-tenant-id", tenant.id);
-  response.headers.set("x-tenant-slug", tenant.slug);
+  const tenantHeaders = { "x-tenant-id": tenant.id, "x-tenant-slug": tenant.slug };
 
   // TEMPORARY, at the user's explicit request ("remove auth for now,
   // directly accessible") — skips the login requirement for every tenant
@@ -68,7 +93,7 @@ export async function proxy(request: NextRequest) {
   // requires a real OWNER session regardless of this flag. See
   // lib/tenant/dev-flags.ts for how to turn this back on.
   if (TENANT_AUTH_DISABLED) {
-    return response;
+    return continueWith(tenantHeaders);
   }
 
   // OWNER does NOT get a bypass onto tenant consoles: OWNER has no tenant
@@ -86,16 +111,16 @@ export async function proxy(request: NextRequest) {
     // pre-auth; the Supabase session tokens are in the URL hash, which never
     // reaches the server, so there's nothing to check here yet).
     if (sessionMatchesTenant && request.nextUrl.pathname.startsWith("/login")) {
-      return redirectTo(request, "/", response);
+      return redirectTo(request, "/", supabaseResponse);
     }
-    return response;
+    return continueWith(tenantHeaders);
   }
 
   if (!sessionMatchesTenant) {
-    return redirectTo(request, "/login", response);
+    return redirectTo(request, "/login", supabaseResponse);
   }
 
-  return response;
+  return continueWith(tenantHeaders);
 }
 
 /** Paths reachable without an existing session: the login form itself, and

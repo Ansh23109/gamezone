@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { createClient } from "@/lib/supabase/server";
-import { getTenantBySlug, type Tenant } from "./resolve";
+import { resolveHostMode, getTenantBySlug, type Tenant } from "./resolve";
 import { TENANT_AUTH_DISABLED } from "./dev-flags";
 
 export type { Tenant };
@@ -41,8 +41,21 @@ export type TenantContext =
  */
 export const getTenantContext = cache(async (): Promise<TenantContext> => {
   const h = await headers();
-  const hostSlug = h.get("x-tenant-slug");
-  const isAdminHost = h.get("x-host-mode") === "admin";
+  // Primary source: the x-tenant-slug/x-host-mode headers proxy.ts sets from
+  // the resolved Host. Defense-in-depth fallback: resolve directly from the
+  // raw `host` header via the same resolveHostMode() proxy.ts uses, in case
+  // those proxy-set headers are ever missing for a given request shape (this
+  // exact gap — headers set on the response object instead of forwarded via
+  // the request — caused real intermittent "Not authenticated" failures in
+  // production once; this fallback means a recurrence degrades gracefully
+  // instead of reproducing that bug).
+  let hostSlug = h.get("x-tenant-slug");
+  let isAdminHost = h.get("x-host-mode") === "admin";
+  if (!hostSlug && !isAdminHost) {
+    const hostMode = resolveHostMode(h.get("host"));
+    if (hostMode.kind === "tenant") hostSlug = hostMode.slug;
+    else if (hostMode.kind === "admin") isAdminHost = true;
+  }
 
   const tenant = hostSlug ? await getTenantBySlug(hostSlug) : null;
 
