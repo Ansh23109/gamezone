@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "@/lib/supabase/middleware";
 import { resolveHostMode, getTenantBySlug } from "@/lib/tenant/resolve";
+import { TENANT_AUTH_DISABLED } from "@/lib/tenant/dev-flags";
 
 // Next.js 16 renamed middleware.ts -> proxy.ts (export name `proxy`, Node.js
 // runtime by default — see node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md).
@@ -60,6 +61,15 @@ export async function proxy(request: NextRequest) {
 
   response.headers.set("x-tenant-id", tenant.id);
   response.headers.set("x-tenant-slug", tenant.slug);
+
+  // TEMPORARY, at the user's explicit request ("remove auth for now,
+  // directly accessible") — skips the login requirement for every tenant
+  // subdomain. admin.edgeweb.co is NOT affected; that console still
+  // requires a real OWNER session regardless of this flag. See
+  // lib/tenant/dev-flags.ts for how to turn this back on.
+  if (TENANT_AUTH_DISABLED) {
+    return response;
+  }
 
   // OWNER does NOT get a bypass onto tenant consoles: OWNER has no tenant
   // `users` row (lib/tenant/context.ts), so requireTenantUser() — which
